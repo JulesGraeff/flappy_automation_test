@@ -28,10 +28,12 @@ def velCallback(msg):
 def laserScanCallback(msg):
     # msg has the format of sensor_msgs::LaserScan
     # print laser angle and range
-    print "Laser range: {}, angle: {}".format(msg.ranges[0], msg.angle_min)
+    print (f"Laser range: {msg.ranges[0]}, angle: {msg.angle_min}")
 
 if __name__ == '__main__':
+
     try:
         initNode()
+
     except rospy.ROSInterruptException:
         pass
