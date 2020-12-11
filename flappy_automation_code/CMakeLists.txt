@@ -17,8 +17,15 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(${PROJECT_NAME}_node src/flappy_automation_code.cpp)
+add_executable(
+  ${PROJECT_NAME}_node src/flappy_automation_code.cpp
+)
+
+# catkin_install_python(PROGRAMS
+#   scripts/flappy_automation_code_node.py
+#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+# )
 
 target_link_libraries(${PROJECT_NAME}_node
-   ${catkin_LIBRARIES}
+  ${catkin_LIBRARIES}
 )
