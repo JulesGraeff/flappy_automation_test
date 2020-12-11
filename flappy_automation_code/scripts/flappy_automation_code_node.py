@@ -36,14 +36,20 @@ class FlappyAutomationNode:
         rospy.Subscriber("/flappy_laser_scan", LaserScan, self._laser_scan_callback)
 
         self.lidar_dict = dict()
+        self.current_vel = Vector3(0,0,0)
 
     def _vel_callback (self, msg):
 
         # msg has the format of geometry_msgs::Vector3
         # Example of publishing acceleration command on velocity velCallback
-        x = 0
-        y = 0
-        self._pub_acc_cmd.publish(Vector3(x,y,0))
+
+        rospy.loginfo(rospy.get_caller_id() + f' msg from vel = {type(msg)}')
+
+        self.current_vel =  msg
+        
+        # x = 0
+        # y = 0
+        # self._pub_acc_cmd.publish(Vector3(x,y,0))
 
     def _laser_scan_callback (self, msg):
 
@@ -54,30 +60,31 @@ class FlappyAutomationNode:
         for (one_laser_measurment, one_laser_intensity) in zip(msg.ranges, msg.intensities):
 
             self.lidar_dict[f'laser_{i}'] = dict()
-            self.lidar_dict[f'laser_{i}']['measure'] = one_laser_measurment
+            self.lidar_dict[f'laser_{i}']['dist_measured'] = one_laser_measurment
             self.lidar_dict[f'laser_{i}']['intensity'] = one_laser_intensity
             self.lidar_dict[f'laser_{i}']['angle'] = msg.angle_min + (msg.angle_increment * i)
 
             i+=1
 
+        assert self.lidar_dict[f'laser_8']['angle'] == msg.angle_max, f"Issue regarding angle increment ! Last laser angle [{self.lidar_dict[f'laser_8']['angle']}] != angle_max [{msg.angle_max}]"
+
         for (laser_name, laser_characteristics) in zip(self.lidar_dict.keys(), self.lidar_dict.values()):
 
-            if laser_characteristics['intensity'] == 1.0:
+            if laser_characteristics['dist_measured'] < LIMIT_DISTANCE:
 
-                print(f'** {laser_name} is detecting an obstacle !')
+                rospy.logwarn(rospy.get_caller_id() + f' {laser_name} is detecting a really closed obstacle !')
 
+                self.stop_flappy()
 
-            # print(one_laser_measurment)
+    def stop_flappy (self):
 
-            # if one_laser_measurment < LIMIT_DISTANCE:
-            #     rospy.logwarn(rospy.get_caller_id() + f'- You are to close !!!')
-
-        rospy.loginfo(self.lidar_dict)
-
-        # rospy.loginfo(f"Laser range: {msg.ranges[0]}, angle: {msg.angle_min}")
-
-
-
+        self._pub_acc_cmd.publish(
+            Vector3(
+                -self.current_vel.x,
+                -self.current_vel.y,
+                -self.current_vel.z,
+            )
+        )
 
 ######################################################################################################################################################
 
