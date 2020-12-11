@@ -9,11 +9,14 @@
 ######################################################################################################################################################
 
 import rospy
+import math
 import numpy as np
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Vector3
 
 ######################################################################################################################################################
+
+LIMIT_DISTANCE = 1.8
 
 class FlappyAutomationNode:
 
@@ -32,6 +35,8 @@ class FlappyAutomationNode:
         rospy.Subscriber("/flappy_vel", Vector3, self._vel_callback)
         rospy.Subscriber("/flappy_laser_scan", LaserScan, self._laser_scan_callback)
 
+        self.lidar_dict = dict()
+
     def _vel_callback (self, msg):
 
         # msg has the format of geometry_msgs::Vector3
@@ -41,9 +46,38 @@ class FlappyAutomationNode:
         self._pub_acc_cmd.publish(Vector3(x,y,0))
 
     def _laser_scan_callback (self, msg):
+
         # msg has the format of sensor_msgs::LaserScan
         # print laser angle and range
-        rospy.loginfo(f"Laser range: {msg.ranges[0]}, angle: {msg.angle_min}")
+        i = 0
+
+        for (one_laser_measurment, one_laser_intensity) in zip(msg.ranges, msg.intensities):
+
+            self.lidar_dict[f'laser_{i}'] = dict()
+            self.lidar_dict[f'laser_{i}']['measure'] = one_laser_measurment
+            self.lidar_dict[f'laser_{i}']['intensity'] = one_laser_intensity
+            self.lidar_dict[f'laser_{i}']['angle'] = msg.angle_min + (msg.angle_increment * i)
+
+            i+=1
+
+        for (laser_name, laser_characteristics) in zip(self.lidar_dict.keys(), self.lidar_dict.values()):
+
+            if laser_characteristics['intensity'] == 1.0:
+
+                print(f'** {laser_name} is detecting an obstacle !')
+
+
+            # print(one_laser_measurment)
+
+            # if one_laser_measurment < LIMIT_DISTANCE:
+            #     rospy.logwarn(rospy.get_caller_id() + f'- You are to close !!!')
+
+        rospy.loginfo(self.lidar_dict)
+
+        # rospy.loginfo(f"Laser range: {msg.ranges[0]}, angle: {msg.angle_min}")
+
+
+
 
 ######################################################################################################################################################
 
