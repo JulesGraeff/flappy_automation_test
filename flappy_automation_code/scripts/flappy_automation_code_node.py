@@ -16,7 +16,7 @@ from geometry_msgs.msg import Vector3
 
 ######################################################################################################################################################
 
-CLOSED_DISTANCE = 2.4
+CLOSED_DISTANCE = 2.6
 LETHAL_DISTANCE = 1.0
 VEL_INCREMENT = 0.2
 
@@ -33,13 +33,13 @@ class FlappyAutomationNode:
         # Publisher for sending acceleration commands to flappy bird
         self._pub_acc_cmd = rospy.Publisher('/flappy_acc', Vector3, queue_size=1)
 
-        # Subscribe to topics for velocity and laser scan from Flappy Bird game
+        # Subscribe to topics for self.current_vel.x and laser scan from Flappy Bird game
         rospy.Subscriber("/flappy_vel", Vector3, self._vel_callback)
         rospy.Subscriber("/flappy_laser_scan", LaserScan, self._laser_scan_callback)
 
         self.lidar_dict = dict()
         self.current_vel = Vector3(0.0,0.0,0.0)
-        self.flappy_on_the_move = False
+        self.flappy_on_the_move = dict(forward = False, up = False, down = False)
         self.game_is_started = False
         self.front_lasers_measurement_list = [CLOSED_DISTANCE]
 
@@ -59,7 +59,7 @@ class FlappyAutomationNode:
                     rospy.logwarn(rospy.get_caller_id() + f' An obstacle has been detected in front of Flappy !!')
                     self.stop_flappy()
                 
-                elif not self.flappy_on_the_move :
+                elif not self.flappy_on_the_move['forward'] :
                     self.move_flappy_forward()
 
             except rospy.ROSInterruptException:
@@ -69,11 +69,11 @@ class FlappyAutomationNode:
     def _vel_callback (self, msg):
 
         # msg has the format of geometry_msgs::Vector3
-        # Example of publishing acceleration command on velocity velCallback
+        # Example of publishing acceleration command on self.current_vel.x velCallback
 
         self.current_vel =  msg
 
-        if self.flappy_on_the_move:
+        if True in self.flappy_on_the_move.values():
             self.stabilize_flappy_velocity()
 
     def _laser_scan_callback (self, msg):
@@ -111,7 +111,9 @@ class FlappyAutomationNode:
             )
         )
 
-        self.flappy_on_the_move = False
+        self.flappy_on_the_move['forward'] = False
+        self.flappy_on_the_move['up'] = False
+        self.flappy_on_the_move['down'] = False
 
     def move_flappy_forward (self):
 
@@ -122,18 +124,55 @@ class FlappyAutomationNode:
                 0.0
             )
         )
-        self.flappy_on_the_move = True
+        self.flappy_on_the_move['forward'] = True
+
+    def move_flappy_up (self):
+
+        self._pub_acc_cmd.publish(
+            Vector3(
+                0.0,
+                VEL_INCREMENT,
+                0.0
+            )
+        )
+        self.flappy_on_the_move['up'] = True
+
+    def move_flappy_down (self):
+
+        self._pub_acc_cmd.publish(
+            Vector3(
+                0.0,
+                - VEL_INCREMENT,
+                0.0
+            )
+        )
+        self.flappy_on_the_move['down'] = True
 
     def stabilize_flappy_velocity (self):
-
+        
         if math.fabs(self.current_vel.x) > VEL_INCREMENT:
 
             # print(f'TOO FAST Vx= {self.current_vel.x}')
 
             self._pub_acc_cmd.publish(
                 Vector3(
-                    -(self.current_vel.x - VEL_INCREMENT),
+                    -(math.fabs(self.current_vel.x) - VEL_INCREMENT),
                     0.0,
+                    0.0
+                )
+            )
+
+        if math.fabs(self.current_vel.y) > VEL_INCREMENT:
+
+            if self.current_vel.y > 0:
+                compensation = -(math.fabs(self.current_vel.y) - VEL_INCREMENT)
+            else:
+                compensation = (math.fabs(self.current_vel.y) - VEL_INCREMENT)
+
+            self._pub_acc_cmd.publish(
+                Vector3(
+                    0.0,
+                    compensation,
                     0.0
                 )
             )
@@ -149,11 +188,14 @@ class FlappyAutomationNode:
         for laser in self.lidar_dict.values():
 
             if laser['intensity'] == 0.0:
-                print(f"Laser number {laser['number']} is not encountring any obstacle")
+                print(f"Laser number {laser['number']} is not encountring any cloosed obstacle")
 
                 no_obstacle_detected_list.append(laser['number'])
 
-        free_laser_number_mean = sum(no_obstacle_detected_list) / len(no_obstacle_detected_list)
+        free_laser_number_mean = 4
+
+        if len(no_obstacle_detected_list) != 0:
+            free_laser_number_mean = sum(no_obstacle_detected_list) / len(no_obstacle_detected_list)
 
         print(f'free_laser_number_mean = {free_laser_number_mean} ')
 
@@ -161,8 +203,16 @@ class FlappyAutomationNode:
 
             print('UP')
 
+            if not self.flappy_on_the_move['up']:
+
+                self.move_flappy_up()
+
         elif free_laser_number_mean < 4:
             print('DOWN')
+
+            if not self.flappy_on_the_move['down']:
+
+                self.move_flappy_down()
 
         else:
             print('STAND BY')
