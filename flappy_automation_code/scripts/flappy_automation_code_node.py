@@ -17,6 +17,7 @@ from geometry_msgs.msg import Vector3
 ######################################################################################################################################################
 
 LIMIT_DISTANCE = 1.8
+VEL_INCREMENT = 0.24
 
 class FlappyAutomationNode:
 
@@ -36,14 +37,15 @@ class FlappyAutomationNode:
         rospy.Subscriber("/flappy_laser_scan", LaserScan, self._laser_scan_callback)
 
         self.lidar_dict = dict()
-        self.current_vel = Vector3(0,0,0)
+        self.current_vel = Vector3(0.0,0.0,0.0)
+        self.flappy_on_the_move = False
 
     def _vel_callback (self, msg):
 
         # msg has the format of geometry_msgs::Vector3
         # Example of publishing acceleration command on velocity velCallback
 
-        rospy.loginfo(rospy.get_caller_id() + f' msg from vel = {type(msg)}')
+        # rospy.loginfo(rospy.get_caller_id() + f' msg from vel = {msg}')
 
         self.current_vel =  msg
         
@@ -66,15 +68,19 @@ class FlappyAutomationNode:
 
             i+=1
 
-        assert self.lidar_dict[f'laser_8']['angle'] == msg.angle_max, f"Issue regarding angle increment ! Last laser angle [{self.lidar_dict[f'laser_8']['angle']}] != angle_max [{msg.angle_max}]"
+        assert self.lidar_dict['laser_8']['angle'] == msg.angle_max, f"Issue regarding angle increment ! Last laser angle [{self.lidar_dict[f'laser_8']['angle']}] != angle_max [{msg.angle_max}]"
 
-        for (laser_name, laser_characteristics) in zip(self.lidar_dict.keys(), self.lidar_dict.values()):
+        # for (laser_name, laser_characteristics) in zip(self.lidar_dict.keys(), self.lidar_dict.values()):
 
-            if laser_characteristics['dist_measured'] < LIMIT_DISTANCE:
+        if self.lidar_dict['laser_4']['dist_measured'] < LIMIT_DISTANCE:
 
-                rospy.logwarn(rospy.get_caller_id() + f' {laser_name} is detecting a really closed obstacle !')
+            rospy.logwarn(rospy.get_caller_id() + f' An obstacle has been detected in front of Flappy !!')
 
-                self.stop_flappy()
+            self.stop_flappy()
+        
+        elif not self.flappy_on_the_move:
+
+            self.move_flappy_forward()
 
     def stop_flappy (self):
 
@@ -86,11 +92,21 @@ class FlappyAutomationNode:
             )
         )
 
+        self.flappy_on_the_move = False
+
+    def move_flappy_forward (self):
+
+        self._pub_acc_cmd.publish(
+            Vector3(VEL_INCREMENT,0,0)
+        )
+        self.flappy_on_the_move = True
+
 ######################################################################################################################################################
 
 if __name__ == '__main__':
 
     try:
+
         flappy_automation_node = FlappyAutomationNode()
 
         # Ros spin to prevent program from exiting
