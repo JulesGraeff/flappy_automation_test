@@ -17,9 +17,10 @@ from geometry_msgs.msg import Vector3
 
 ######################################################################################################################################################
 
-CLOSED_DISTANCE = 2.5
-LETHAL_DISTANCE = 0.6
-VEL_INCREMENT = 0.25
+CLOSED_DISTANCE = 2.2
+LETHAL_DISTANCE = 0.7
+ACC_INCREMENT = 0.25
+LATERAL_TICK = 0.05
 
 class FlappyAutomationNode:
 
@@ -45,9 +46,6 @@ class FlappyAutomationNode:
         self.bottom_lasers_measurement_list = [CLOSED_DISTANCE]
         self.top_lasers_measurement_list = [CLOSED_DISTANCE]
 
-        self._up_counter = 0
-        self._down_counter = 0
-
         self.flappy_on_the_move = dict(forward = False, up = False, down = False)
         
         self.command_acc_y = 0.0
@@ -62,43 +60,36 @@ class FlappyAutomationNode:
 
         self.move_flappy_forward()
 
+        while not self.vel_x_reached:
+            pass
+
+        print(f"MAIN {self.flappy_on_the_move['forward']}")
+
         while not rospy.is_shutdown():
 
             try:
 
-                if self.lidar_dict['laser_4']['dist_measured'] < LETHAL_DISTANCE or self.lidar_dict['laser_5']['dist_measured'] < LETHAL_DISTANCE or self.lidar_dict['laser_3']['dist_measured'] < LETHAL_DISTANCE:
+                if min(self.front_lasers_measurement_list) <= LETHAL_DISTANCE:
+                    self.stop_x_flappy_vel()
 
-                    # rospy.logwarn(rospy.get_caller_id() + f' An obstacle has been detected aroun Flappy !!')
-
-                    if self.lidar_dict['laser_4']['dist_measured'] < LETHAL_DISTANCE or (self.lidar_dict['laser_3']['dist_measured'] < LETHAL_DISTANCE and self.lidar_dict['laser_5']['dist_measured'] < LETHAL_DISTANCE):
-                        
-                        if self.flappy_on_the_move['forward']:
-                            self.stop_flappy()
-
-                    if self.lidar_dict['laser_4']['dist_measured'] > LETHAL_DISTANCE:
-
-                        if min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and not self.flappy_on_the_move['up']:
-                            self.move_flappy_up(VEL_INCREMENT)
-
-                        elif min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and not self.flappy_on_the_move['down']:
-                            self.move_flappy_down(VEL_INCREMENT)
-
-                        if min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE or min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and not self.flappy_on_the_move['forward']:
-                            self.move_flappy_forward(VEL_INCREMENT)
-                
                 elif not self.flappy_on_the_move['forward']:
                     self.move_flappy_forward()
 
                 lateral_obstacle = min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.front_lasers_measurement_list) > LETHAL_DISTANCE
+                
+                if (min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and self.flappy_on_the_move['up']) or (min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and self.flappy_on_the_move['down']):
+                    
+                    self.stop_y_flappy_vel()
+                    print('STOP VEL Y')
+                    self.trying_to_find_path = False
 
-                if min(self.front_lasers_measurement_list) < CLOSED_DISTANCE and not lateral_obstacle:
+                elif not lateral_obstacle:
                     
                     self.find_free_path()
                     self.trying_to_find_path = True
 
             except rospy.ROSInterruptException:
                 break
-        
 
     def _vel_callback (self, msg):
 
@@ -106,37 +97,40 @@ class FlappyAutomationNode:
         # Example of publishing acceleration command on self.current_vel.x velCallback
 
         self.current_vel =  msg
+
+        if self.game_is_started:
         
-        if self.current_vel.x >= self.command_acc_x:
+            if self.current_vel.x >= self.command_acc_x:
 
-            if not self.vel_x_reached: # STOP ACC
+                if not self.vel_x_reached: # STOP ACC
 
-                print(f'X Speed reached for {self.current_vel.x}m/s.')
-                self._pub_acc_cmd.publish( Vector3(0.0, 0.0, 0.0) )
-                self.vel_x_reached = True
-
-        else:
-            self.vel_x_reached = False
-
-        if self.trying_to_find_path:
-
-            if fabs(self.current_vel.y) >= fabs(self.command_acc_y):
-
-                if not self.vel_y_reached: # STOP ACC
-
-                    print(f'Y Speed reached for {self.current_vel.x} m/s.')
+                    print(f'X Speed reached for {self.current_vel.x}m/s.')
                     self._pub_acc_cmd.publish( Vector3(0.0, 0.0, 0.0) )
-                    self.vel_y_reached = True
+                    self.vel_x_reached = True
 
             else:
-                self.vel_y_reached = False
+                self.vel_x_reached = False
 
-        if fabs(self.current_vel.x) < 0.001:
-            self.flappy_on_the_move['forward'] = False
+            if self.trying_to_find_path:
 
-        if fabs(self.current_vel.y) < 0.001:
-            self.flappy_on_the_move['up'] = False
-            self.flappy_on_the_move['down'] = False
+                if fabs(self.current_vel.y) >= fabs(self.command_acc_y):
+
+                    if not self.vel_y_reached: # STOP ACC
+
+                        print(f'Y Speed reached for {self.current_vel.x} m/s.')
+                        # self._pub_acc_cmd.publish( Vector3(0.0, 0.0, 0.0) )
+                        self.stop_y_flappy_vel()
+                        self.vel_y_reached = True
+
+                else:
+                    self.vel_y_reached = False
+
+            if fabs(self.current_vel.x) < 0.0005:
+                self.flappy_on_the_move['forward'] = False
+
+            if fabs(self.current_vel.y) < 0.0005:
+                self.flappy_on_the_move['up'] = False
+                self.flappy_on_the_move['down'] = False
 
     def _laser_scan_callback (self, msg):
 
@@ -178,22 +172,38 @@ class FlappyAutomationNode:
         if min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE:
             rospy.logwarn('DOWN LASER ARE INFORMING OF A COLLISION!')
 
-        if min(self.front_lasers_measurement_list) <= LETHAL_DISTANCE:
-            rospy.logwarn('FRONT LASER ARE INFORMING OF A COLLISION!')
+        # if min(self.front_lasers_measurement_list) <= LETHAL_DISTANCE:
+        #     rospy.logwarn('FRONT LASER ARE INFORMING OF A COLLISION!')
 
-    def stop_flappy (self):
+    def stop_x_flappy_vel (self):
 
-        print(f'STOP => self.current_vel.x = {self.current_vel.x}')
+        if self.flappy_on_the_move['forward']:
 
-        self._pub_acc_cmd.publish(
-            Vector3(
-                -self.current_vel.x*2,
-                -self.current_vel.y*2,
-                -self.current_vel.z*2,
+            print(f'STOP X => self.current_vel.x = {self.current_vel.x}')
+
+            self._pub_acc_cmd.publish(
+                Vector3(
+                    -(self.current_vel.x *2),
+                    0.0,
+                    0.0
+                )
             )
-        )
 
-    def move_flappy_forward (self, acc=VEL_INCREMENT):
+    def stop_y_flappy_vel (self):
+
+        if True in [self.flappy_on_the_move['up'], self.flappy_on_the_move['down']]:
+
+            print(f'STOP Y => self.current_vel.y = {self.current_vel.y} / command_acc_y = {self.command_acc_y}')
+
+            self._pub_acc_cmd.publish(
+                Vector3(
+                    0.0,
+                    -(self.current_vel.y*2),
+                    0.0
+                )
+            )
+
+    def move_flappy_forward (self, acc=ACC_INCREMENT):
 
         self.command_acc_x = acc
 
@@ -208,9 +218,9 @@ class FlappyAutomationNode:
         )
         self.flappy_on_the_move['forward'] = True
 
-    def move_flappy_up (self, vel=(VEL_INCREMENT/10.0)):
+    def move_flappy_up (self, acc=LATERAL_TICK):
 
-        self.command_acc_y = vel
+        self.command_acc_y = acc
 
         self._pub_acc_cmd.publish(
             Vector3(
@@ -222,9 +232,9 @@ class FlappyAutomationNode:
         self.flappy_on_the_move['up'] = True
         self.flappy_on_the_move['down'] = False
 
-    def move_flappy_down (self, vel=(VEL_INCREMENT/10.0)):
+    def move_flappy_down (self, acc=LATERAL_TICK):
 
-        self.command_acc_y = -vel
+        self.command_acc_y = -acc
 
         self._pub_acc_cmd.publish(
             Vector3(
@@ -238,56 +248,30 @@ class FlappyAutomationNode:
 
     def find_free_path (self):
 
-        # list_laser 
-        
-        # if True in [laser['intensity'] == 0.0 in self.lidar_dict.values()]:
-
-        no_obstacle_detected_list = []
+        free_path_detected_list = []
 
         for laser in self.lidar_dict.values():
 
             if laser['intensity'] == 0.0 or laser['dist_measured'] > CLOSED_DISTANCE:
                 # print(f"Laser number {laser['number']} is not encountring any cloosed obstacle")
-
-                no_obstacle_detected_list.append(laser['number'])
+                free_path_detected_list.append(laser['number'])
 
         free_laser_number_mean = 4.0
 
-        if len(no_obstacle_detected_list) != 0:
-            free_laser_number_mean = sum(no_obstacle_detected_list) / len(no_obstacle_detected_list)
+        if len(free_path_detected_list) != 0:
+            free_laser_number_mean = sum(free_path_detected_list) / len(free_path_detected_list)
 
         # print(f'free_laser_number_mean = {free_laser_number_mean} ')
 
         if free_laser_number_mean > 4.0:
-
-            self._up_counter += 1
-
-            if not self.flappy_on_the_move['up'] or self._up_counter>50000:
-
-                print('UP')
-
-                self.move_flappy_up()
-                # self.move_flappy_up((free_laser_number_mean - 4.0) / 10.0)
-                self._up_counter = 0
-            
-            # self.move_flappy_up(free_laser_number_mean - 4.0)
+            self.move_flappy_up()
 
         elif free_laser_number_mean < 4.0:
-
-            self._down_counter += 1
-
-            if not self.flappy_on_the_move['down'] or self._down_counter>50000:
-
-                print('DOWN')
-
-                self.move_flappy_down()
-                # self.move_flappy_down((free_laser_number_mean - 4.0) / 10.0)
-                self._down_counter = 0
-
-            # self.move_flappy_up(free_laser_number_mean - 4.0)
+            self.move_flappy_down()
 
         else:
             # print('STAND BY')
+            self.stop_y_flappy_vel()
             pass
 
 ######################################################################################################################################################
