@@ -20,7 +20,7 @@ from geometry_msgs.msg import Vector3
 CLOSED_DISTANCE = 2.2
 LETHAL_DISTANCE = 0.7
 ACC_INCREMENT = 0.25
-LATERAL_TICK = 0.05
+LATERAL_TICK = 0.07
 
 class FlappyAutomationNode:
 
@@ -77,13 +77,29 @@ class FlappyAutomationNode:
 
                 lateral_obstacle = min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.front_lasers_measurement_list) > LETHAL_DISTANCE
                 
-                if (min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and self.flappy_on_the_move['up']) or (min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and self.flappy_on_the_move['down']):
+                if min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE or min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE:
                     
                     self.stop_y_flappy_vel()
-                    print('STOP VEL Y')
                     self.trying_to_find_path = False
 
-                elif not lateral_obstacle:
+                    if min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and not min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE:
+                        self.move_flappy_down(ACC_INCREMENT)
+
+                    elif min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and not min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE:
+                        self.move_flappy_up(ACC_INCREMENT)
+                        
+                    elif min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE:
+
+                        diff = sum(self.top_lasers_measurement_list) - sum(self.bottom_lasers_measurement_list)
+
+                        if diff<0:
+                            self.move_flappy_down()
+
+                        elif diff>0:
+                            self.move_flappy_up()
+
+
+                if not lateral_obstacle:
                     
                     self.find_free_path()
                     self.trying_to_find_path = True
@@ -177,13 +193,15 @@ class FlappyAutomationNode:
 
     def stop_x_flappy_vel (self):
 
-        if self.flappy_on_the_move['forward']:
+        # if self.flappy_on_the_move['forward']:
+
+        if self.current_vel.x != 0.0:
 
             print(f'STOP X => self.current_vel.x = {self.current_vel.x}')
 
             self._pub_acc_cmd.publish(
                 Vector3(
-                    -(self.current_vel.x *2),
+                    -self.command_acc_x,
                     0.0,
                     0.0
                 )
@@ -198,7 +216,7 @@ class FlappyAutomationNode:
             self._pub_acc_cmd.publish(
                 Vector3(
                     0.0,
-                    -(self.current_vel.y*2),
+                    -self.current_vel.y,
                     0.0
                 )
             )
