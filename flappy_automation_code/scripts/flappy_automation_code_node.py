@@ -59,6 +59,13 @@ class FlappyAutomationNode:
             pass
 
         self.move_flappy_forward()
+        self._pub_acc_cmd.publish(
+            Vector3(
+                self.command_acc_x,
+                self.command_acc_y,
+                0.0
+            )
+        )
 
         while not self.vel_x_reached:
             pass
@@ -69,13 +76,15 @@ class FlappyAutomationNode:
 
             try:
 
+                # X Management
+
                 if min(self.front_lasers_measurement_list) <= LETHAL_DISTANCE:
                     self.stop_x_flappy_vel()
 
                 elif not self.flappy_on_the_move['forward']:
                     self.move_flappy_forward()
 
-                lateral_obstacle = min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.front_lasers_measurement_list) > LETHAL_DISTANCE
+                # Y Management
                 
                 if min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE or min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE:
                     
@@ -83,26 +92,26 @@ class FlappyAutomationNode:
                     self.trying_to_find_path = False
 
                     if min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE and not min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE:
-                        self.move_flappy_down(ACC_INCREMENT)
+                        self.move_flappy_down((ACC_INCREMENT/2))
 
                     elif min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and not min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE:
-                        self.move_flappy_up(ACC_INCREMENT)
-                        
-                    elif min(self.bottom_lasers_measurement_list) <= LETHAL_DISTANCE and min(self.top_lasers_measurement_list) <= LETHAL_DISTANCE:
+                        self.move_flappy_up((ACC_INCREMENT/2))
 
-                        diff = sum(self.top_lasers_measurement_list) - sum(self.bottom_lasers_measurement_list)
-
-                        if diff<0:
-                            self.move_flappy_down()
-
-                        elif diff>0:
-                            self.move_flappy_up()
-
-
-                if not lateral_obstacle:
+                else:
                     
                     self.find_free_path()
                     self.trying_to_find_path = True
+
+                # ACC command
+
+                print(f'PUBLISH => x command = {self.command_acc_x} && y command = {self.command_acc_y}')
+                self._pub_acc_cmd.publish(
+                    Vector3(
+                        self.command_acc_x,
+                        self.command_acc_y,
+                        0.0
+                    )
+                )
 
             except rospy.ROSInterruptException:
                 break
@@ -121,7 +130,7 @@ class FlappyAutomationNode:
                 if not self.vel_x_reached: # STOP ACC
 
                     print(f'X Speed reached for {self.current_vel.x}m/s.')
-                    self._pub_acc_cmd.publish( Vector3(0.0, 0.0, 0.0) )
+                    self.command_acc_x = 0.0
                     self.vel_x_reached = True
 
             else:
@@ -134,7 +143,6 @@ class FlappyAutomationNode:
                     if not self.vel_y_reached: # STOP ACC
 
                         print(f'Y Speed reached for {self.current_vel.x} m/s.')
-                        # self._pub_acc_cmd.publish( Vector3(0.0, 0.0, 0.0) )
                         self.stop_y_flappy_vel()
                         self.vel_y_reached = True
 
@@ -143,10 +151,12 @@ class FlappyAutomationNode:
 
             if fabs(self.current_vel.x) < 0.0005:
                 self.flappy_on_the_move['forward'] = False
+                self.command_acc_x = 0.0
 
             if fabs(self.current_vel.y) < 0.0005:
                 self.flappy_on_the_move['up'] = False
                 self.flappy_on_the_move['down'] = False
+                self.command_acc_y = 0.0
 
     def _laser_scan_callback (self, msg):
 
@@ -193,60 +203,21 @@ class FlappyAutomationNode:
 
     def stop_x_flappy_vel (self):
 
-        # if self.flappy_on_the_move['forward']:
-
-        if self.current_vel.x != 0.0:
-
-            print(f'STOP X => self.current_vel.x = {self.current_vel.x}')
-
-            self._pub_acc_cmd.publish(
-                Vector3(
-                    -self.command_acc_x,
-                    0.0,
-                    0.0
-                )
-            )
+        self.command_acc_x = -self.current_vel.x
 
     def stop_y_flappy_vel (self):
 
-        if True in [self.flappy_on_the_move['up'], self.flappy_on_the_move['down']]:
-
-            print(f'STOP Y => self.current_vel.y = {self.current_vel.y} / command_acc_y = {self.command_acc_y}')
-
-            self._pub_acc_cmd.publish(
-                Vector3(
-                    0.0,
-                    -self.current_vel.y,
-                    0.0
-                )
-            )
+        self.command_acc_y = -self.current_vel.y
 
     def move_flappy_forward (self, acc=ACC_INCREMENT):
 
         self.command_acc_x = acc
-
-        print(f'MOVE FORWARD => self.command_acc_x = {self.command_acc_x} ')
-
-        self._pub_acc_cmd.publish(
-            Vector3(
-                self.command_acc_x,
-                0.0,
-                0.0
-            )
-        )
         self.flappy_on_the_move['forward'] = True
 
     def move_flappy_up (self, acc=LATERAL_TICK):
 
         self.command_acc_y = acc
 
-        self._pub_acc_cmd.publish(
-            Vector3(
-                0.0,
-                self.command_acc_y,
-                0.0
-            )
-        )
         self.flappy_on_the_move['up'] = True
         self.flappy_on_the_move['down'] = False
 
@@ -254,13 +225,6 @@ class FlappyAutomationNode:
 
         self.command_acc_y = -acc
 
-        self._pub_acc_cmd.publish(
-            Vector3(
-                0.0,
-                self.command_acc_y,
-                0.0
-            )
-        )
         self.flappy_on_the_move['down'] = True
         self.flappy_on_the_move['up'] = False
 
