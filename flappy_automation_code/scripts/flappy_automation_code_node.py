@@ -2,8 +2,8 @@
 
 #####################################################################################################################################################
 
-# @project        IROS Partiel
-# @file           path/to/file
+# @project        Test for FlyAbility (fork from https://github.com/JohsBL/flappy_automation_test)
+# @file           src/flappy_automation_test/flappy_automation_code/scripts/flappy_automation_code_node.py
 # @author         Jules Graeff
 
 ######################################################### LIBRARIES #################################################################################
@@ -19,11 +19,11 @@ from geometry_msgs.msg import Vector3
 
 ######################################################## GLOBAL CONSTANTS ###########################################################################
 
-CLOSED_DISTANCE = 2.2 
+SPEED_FACTOR = 2
+CLOSED_DISTANCE = 2.15
 FRONT_LETHAL_DISTANCE = 1.1
-LATERAL_LETHAL_DISTANCE = 0.5
-ACC_INCREMENT = 0.25  * 2
-LATERAL_TICK = 0.07
+ACC_INCREMENT = 0.25  * SPEED_FACTOR
+LATERAL_TICK = 0.07 * SPEED_FACTOR
 
 class State(Enum):
     INIT = 0
@@ -57,7 +57,6 @@ class FlappyAutomationNode:
         # CLASS VARIABLES
 
         self.game_is_started = False
-    
         self.lidar_dict = dict()    # Lidar information
 
         # Mouvement information
@@ -66,10 +65,9 @@ class FlappyAutomationNode:
         
         self.flappy_on_the_move = dict(forward = False, up = True, down = False)
         
-        self.command_acc_x = 0.2
-        self.command_acc_y = 0.45
-        self.vel_x_reached = False
-        self.vel_y_reached = False
+        self.command_acc_x = ACC_INCREMENT
+        self.command_acc_y = 0.5
+        self.tick_y_reached = False
 
         state = State.INIT
         old_state = None
@@ -111,24 +109,26 @@ class FlappyAutomationNode:
                     self.stop_y_flappy_vel()
 
                 elif state == State.GO_THROUGH_DOOR:
-
                     self.move_flappy_forward()
-                    self.obstacles_crossed_number += 1
-                    rospy.loginfo(f'New obstacle crossed [number = {self.obstacles_crossed_number}] !')
 
                 elif state == State.PASSING_IN_DOOR:
                     self.command_acc_x == 0.0
 
+                elif state == State.DOOR_PASSED:
+                    # self.stop_x_flappy_vel()
+                    self.obstacles_crossed_number += 1
+                    rospy.loginfo(f'New obstacle crossed [number = {self.obstacles_crossed_number}] !')
+
                 if min(self._select_lasers('front', 'distance')) < FRONT_LETHAL_DISTANCE:
                     self.stop_x_flappy_vel()
-
-                # ACC COMMAND
 
                 if state != old_state:
 
                     rospy.loginfo(f'>>> STATE = {state}')
-                    rospy.logdebug(f'Acc command => for x = {self.command_acc_x} && for y = {self.command_acc_y}')
+                    rospy.loginfo(f'Acc command => for x = {self.command_acc_x} && for y = {self.command_acc_y}')
                     old_state = state
+
+                # ACC COMMAND
 
                 self._pub_acc_cmd.publish(
                     Vector3(
@@ -142,6 +142,16 @@ class FlappyAutomationNode:
                 break
 
     def _select_lasers (self, location, data_type):
+        """
+        [Select and fetch the values of the data_type chosen for the lasers in the location wanted]
+
+        Args:
+            location ([str]): ['front', 'bottom', 'top']
+            data_type ([str]): ['distance', 'contact']
+
+        Returns:
+            [list]: [list of the data_type laser value for the location chosen]
+        """        
 
         assert location in ['front', 'bottom', 'top']
         assert data_type in ['distance', 'contact']
@@ -165,6 +175,12 @@ class FlappyAutomationNode:
         return returned_list
 
     def _vel_callback (self, vel_vector):
+        """
+        [Callback of /flappy_vel topic => Allows to fetch vel and stabalize it if to high]
+
+        Args:
+            vel_vector ([Vector3]): [topic /flappy_vel value]
+        """        
 
         self.current_vel = vel_vector
 
@@ -174,40 +190,42 @@ class FlappyAutomationNode:
 
             if self.current_vel.x >= self.command_acc_x:
 
-                # rospy.loginfo(f'X Speed reached for {self.current_vel.x}m/s.')
+                rospy.logdebug(f'X Speed reached for {self.current_vel.x}m/s.')
                 self.command_acc_x = 0.0
-                self.vel_x_reached = True
-
-            else:
-                self.vel_x_reached = False
 
             # TICK Y STABILISATION
 
             if fabs(self.current_vel.y) >= fabs(self.command_acc_y):
 
-                if not self.vel_y_reached: # STOP Y ACC
+                if not self.tick_y_reached: # STOP Y ACC
 
-                    rospy.loginfo(f'Y tick reached.')
+                    rospy.logdebug(f'Y tick reached.')
                     self.stop_y_flappy_vel()
-                    self.vel_y_reached = True
+                    self.tick_y_reached = True
 
             else:
-                self.vel_y_reached = False
+                self.tick_y_reached = False
 
             # ON THE MOVE DEFINITION
 
-            if fabs(self.current_vel.x) < 0.0005 and self.flappy_on_the_move['forward']:
+            if fabs(self.current_vel.x) < 0.005 and self.flappy_on_the_move['forward']:
 
                 self.flappy_on_the_move['forward'] = False
                 self.command_acc_x = 0.0
 
-            if fabs(self.current_vel.y) < 0.0005 and (self.flappy_on_the_move['up'] or self.flappy_on_the_move['down']):
+            if fabs(self.current_vel.y) < 0.005 and (self.flappy_on_the_move['up'] or self.flappy_on_the_move['down']):
 
                 self.flappy_on_the_move['up'] = False
                 self.flappy_on_the_move['down'] = False
                 self.command_acc_y = 0.0
 
     def _laser_scan_callback (self, msg):
+        """
+        [Callback of /flappy_laser_scan topic => Allows to fetch all lasers data and to store it inside one dict]
+
+        Args:
+            msg ([LaserScan]): [topic /flappy_laser_scan value]
+        """        
 
         if not self.game_is_started:
 
@@ -252,6 +270,9 @@ class FlappyAutomationNode:
         self.flappy_on_the_move['up'] = False
 
     def search_free_path (self):
+        """
+        [Via the distance of each laser, define a lateral direction to perform]
+        """        
 
         free_path_detected_list = []
 
@@ -267,7 +288,7 @@ class FlappyAutomationNode:
         if len(free_path_detected_list) != 0:
             free_laser_number_mean = sum(free_path_detected_list) / len(free_path_detected_list)
 
-        rospy.loginfo(f'free_laser_number_mean = {free_laser_number_mean} ')
+        rospy.logdebug(f'free_laser_number_mean = {free_laser_number_mean} ')
 
         if free_laser_number_mean > 4.0:
             self.move_flappy_up()
@@ -276,8 +297,16 @@ class FlappyAutomationNode:
             self.move_flappy_down()
 
         else:
+
             self.stop_y_flappy_vel()
 
+            if 4 in free_path_detected_list:
+
+                if 5 in free_path_detected_list:
+                    self.move_flappy_up()
+
+                elif 3 in free_path_detected_list:
+                    self.move_flappy_down()
 
 ######################################################################################################################################################
 
