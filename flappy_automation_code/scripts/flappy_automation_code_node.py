@@ -98,26 +98,35 @@ class FlappyAutomationNode:
                 if min(self.front_lasers_measurement_list) <= FRONT_LETHAL_DISTANCE:
                     self.stop_x_flappy_vel()
 
-                elif not self.flappy_on_the_move['forward']:
-                    self.move_flappy_forward()
-                    
-                # Y VEL MANAGEMENT
-                
-                if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE or self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                    
+                # elif not self.flappy_on_the_move['forward']:
+                #     self.move_flappy_forward()
+
+                elif not False in [distance >  CLOSED_DISTANCE for distance in self.front_lasers_measurement_list]:
+
+                    if not self.flappy_on_the_move['forward']:
+                        self.move_flappy_forward()
+
                     self.stop_y_flappy_vel()
-                    self.trying_to_find_path = False
 
-                    if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                        self.move_flappy_down(LATERAL_TICK*2)
-
-                    elif self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                        self.move_flappy_up(LATERAL_TICK*2)
-
-                elif min(self.front_lasers_measurement_list) < 3.5:
+                else:
+    
+                    # Y VEL MANAGEMENT
                     
-                    self.find_free_path()
-                    self.trying_to_find_path = True
+                    if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE or self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
+                        
+                        self.stop_y_flappy_vel()
+                        self.trying_to_find_path = False
+
+                        if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
+                            self.move_flappy_down(LATERAL_TICK*2)
+
+                        elif self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE:
+                            self.move_flappy_up(LATERAL_TICK*2)
+
+                    elif min(self.front_lasers_measurement_list) < 3.5:
+                        
+                        self.find_free_path()
+                        self.trying_to_find_path = True
 
                 # ACC COMMAND
 
@@ -133,6 +142,9 @@ class FlappyAutomationNode:
                         0.0
                     )
                 )
+
+                if self.command_acc_x > 0:
+                    rospy.sleep(0.2) 
 
                 self._display_counter += 1
 
