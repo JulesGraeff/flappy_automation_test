@@ -12,6 +12,7 @@ import rospy
 import time
 import numpy as np
 from math import fabs
+from enum import Enum
 
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Vector3
@@ -23,6 +24,14 @@ FRONT_LETHAL_DISTANCE = 1.1
 LATERAL_LETHAL_DISTANCE = 0.5
 ACC_INCREMENT = 0.25  * 2
 LATERAL_TICK = 0.07
+
+class State(Enum):
+    INIT = 0
+    DOOR_SEARCH = 1
+    DOOR_FOUND = 2
+    GO_THROUGH_DOOR = 3
+    PASSING_IN_DOOR = 4
+    DOOR_PASSED = 5
 
 ######################################################## NODE CLASS #################################################################################
 
@@ -61,7 +70,7 @@ class FlappyAutomationNode:
 
         self.current_vel = Vector3(0.0,0.0,0.0)
         
-        self.flappy_on_the_move = dict(forward = False, up = False, down = False)
+        self.flappy_on_the_move = dict(forward = False, up = True, down = False)
         
         self.command_acc_x = 0.2
         self.command_acc_y = 0.45
@@ -69,23 +78,16 @@ class FlappyAutomationNode:
         self.vel_y_reached = False
 
         self.trying_to_find_path = False
+        self.state = State.INIT
+        old_state = None
+
+        self.obstacles_crossed_number = 0
 
         # MAIN
 
         while not self.game_is_started:
             pass
-
-        # self.move_flappy_forward()
-        self._pub_acc_cmd.publish(
-            Vector3(
-                self.command_acc_x,
-                self.command_acc_y,
-                0.0
-            )
-        )
-
-        while not self.vel_x_reached:
-            pass
+        
 
         print(f"MAIN {self.flappy_on_the_move['forward']}")
 
@@ -93,44 +95,48 @@ class FlappyAutomationNode:
 
             try:
 
-                # X VEL MANAGEMENT
+                # STATE DEFINITION
 
-                if min(self.front_lasers_measurement_list) <= FRONT_LETHAL_DISTANCE:
-                    self.stop_x_flappy_vel()
+                if self.state == State.DOOR_SEARCH and min(self._select_lasers('front', 'distance')) > CLOSED_DISTANCE:
+                    self.state = State.DOOR_FOUND
 
-                # elif not self.flappy_on_the_move['forward']:
-                #     self.move_flappy_forward()
+                elif (min(self._select_lasers('front', 'distance')) < CLOSED_DISTANCE and self.state in [State.DOOR_PASSED, State.INIT]) or (self.state == State.DOOR_FOUND and min(self._select_lasers('front', 'distance')) <= CLOSED_DISTANCE):
+                    self.state = State.DOOR_SEARCH
 
-                elif not False in [distance >  CLOSED_DISTANCE for distance in self.front_lasers_measurement_list]:
+                elif self.state == State.DOOR_FOUND and min(self._select_lasers('front', 'distance')) > CLOSED_DISTANCE and not True in [self.flappy_on_the_move['up'], self.flappy_on_the_move['down']]:
+                    self.state = State.GO_THROUGH_DOOR
 
-                    if not self.flappy_on_the_move['forward']:
-                        self.move_flappy_forward()
+                elif self.state == State.PASSING_IN_DOOR and min(self._select_lasers('front', 'distance')) < CLOSED_DISTANCE :
+                    self.state = State.DOOR_PASSED
 
+                elif self.state in [State.GO_THROUGH_DOOR, State.PASSING_IN_DOOR]:
+                    self.state = State.PASSING_IN_DOOR
+
+
+                # COMMAND REGARDING STATE
+                if self.state == State.DOOR_SEARCH:
+                    self.search_free_path()
+
+                elif self.state == State.DOOR_FOUND:
                     self.stop_y_flappy_vel()
 
-                else:
-    
-                    # Y VEL MANAGEMENT
-                    
-                    if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE or self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                        
-                        self.stop_y_flappy_vel()
-                        self.trying_to_find_path = False
+                elif self.state == State.GO_THROUGH_DOOR:
 
-                        if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                            self.move_flappy_down(LATERAL_TICK*2)
+                    self.move_flappy_forward()
+                    self.obstacles_crossed_number += 1
 
-                        elif self.bottom_laser_measurement <= LATERAL_LETHAL_DISTANCE and not self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE:
-                            self.move_flappy_up(LATERAL_TICK*2)
+                elif self.state == State.PASSING_IN_DOOR:
+                    self.command_acc_x == 0.0
 
-                    elif min(self.front_lasers_measurement_list) < 3.5:
-                        
-                        self.find_free_path()
-                        self.trying_to_find_path = True
+                if min(self._select_lasers('front', 'distance')) < FRONT_LETHAL_DISTANCE:
+                    self.stop_x_flappy_vel()
 
                 # ACC COMMAND
+                if self.state != old_state:
+                    rospy.loginfo(f'>>> STATE = {self.state} // self.obstacles_crossed_number = {self.obstacles_crossed_number}')
+                    old_state = self.state
 
-                if self._display_counter > 1000:
+                if self._display_counter > 10000:
 
                     rospy.logdebug(f'ACC command => for x = {self.command_acc_x} && for y = {self.command_acc_y}')
                     self._display_counter = 0
@@ -143,13 +149,37 @@ class FlappyAutomationNode:
                     )
                 )
 
-                if self.command_acc_x > 0:
-                    rospy.sleep(0.2) 
+                # if self.command_acc_x > 0.0:
+                #     print('wait')
+                #     rospy.sleep(1.0) 
 
                 self._display_counter += 1
 
             except rospy.ROSInterruptException:
                 break
+
+    def _select_lasers (self, location, data_type):
+
+        assert location in ['front', 'bottom', 'top']
+        assert data_type in ['distance', 'contact']
+
+        if location == 'front':
+            i_list = [3, 4, 5]
+
+        elif location == 'bottom':
+            i_list = [0]
+
+        elif location == 'top':
+            i_list = [8]
+
+        returned_list = list()
+
+        for laser in self.lidar_dict.values():
+
+            if laser['number'] in i_list:
+                returned_list.append(laser[data_type])
+
+        return returned_list
 
     def _vel_callback (self, vel_vector):
 
@@ -161,11 +191,9 @@ class FlappyAutomationNode:
 
             if self.current_vel.x >= self.command_acc_x:
 
-                if not self.vel_x_reached: # STOP X ACC
-
-                    rospy.loginfo(f'X Speed reached for {self.current_vel.x}m/s.')
-                    self.command_acc_x = 0.0
-                    self.vel_x_reached = True
+                # rospy.loginfo(f'X Speed reached for {self.current_vel.x}m/s.')
+                self.command_acc_x = 0.0
+                self.vel_x_reached = True
 
             else:
                 self.vel_x_reached = False
@@ -187,12 +215,12 @@ class FlappyAutomationNode:
 
             # ON THE MOVE DEFINITION
 
-            if fabs(self.current_vel.x) < 0.0005:
+            if fabs(self.current_vel.x) < 0.0005 and self.flappy_on_the_move['forward']:
 
                 self.flappy_on_the_move['forward'] = False
                 self.command_acc_x = 0.0
 
-            if fabs(self.current_vel.y) < 0.0005:
+            if fabs(self.current_vel.y) < 0.0005 and (self.flappy_on_the_move['up'] or self.flappy_on_the_move['down']):
 
                 self.flappy_on_the_move['up'] = False
                 self.flappy_on_the_move['down'] = False
@@ -208,12 +236,13 @@ class FlappyAutomationNode:
         i = 0
         self.front_lasers_measurement_list.clear()
 
+        # Dict 
         for (laser_measurement, laser_intensity) in zip(msg.ranges, msg.intensities):
 
             self.lidar_dict[f'laser_{i}'] = dict()
-            self.lidar_dict[f'laser_{i}']['dist_measured'] = laser_measurement
+            self.lidar_dict[f'laser_{i}']['distance'] = laser_measurement
             self.lidar_dict[f'laser_{i}']['number'] = i
-            self.lidar_dict[f'laser_{i}']['intensity'] = laser_intensity
+            self.lidar_dict[f'laser_{i}']['contact'] = bool(int(laser_intensity))
             self.lidar_dict[f'laser_{i}']['angle'] = msg.angle_min + (msg.angle_increment * i)
 
             if i  == 0:
@@ -229,7 +258,7 @@ class FlappyAutomationNode:
 
         assert self.lidar_dict['laser_8']['angle'] == msg.angle_max, f"Issue regarding angle increment ! Last laser angle [{self.lidar_dict[f'laser_8']['angle']}] != angle_max [{msg.angle_max}]"
 
-        if self._display_counter > 1000:
+        if self._display_counter > 10000:
 
             if self.top_laser_measurement <= LATERAL_LETHAL_DISTANCE:
                 rospy.logwarn('TOP LASER ARE INFORMING OF A COLLISION!')
@@ -263,13 +292,13 @@ class FlappyAutomationNode:
         self.flappy_on_the_move['down'] = True
         self.flappy_on_the_move['up'] = False
 
-    def find_free_path (self):
+    def search_free_path (self):
 
         free_path_detected_list = []
 
         for laser in self.lidar_dict.values():
 
-            if laser['intensity'] == 0.0 or laser['dist_measured'] > CLOSED_DISTANCE:
+            if not laser['contact'] or laser['distance'] > CLOSED_DISTANCE:
 
                 rospy.logdebug(f"Laser number {laser['number']} is not encountring any cloosed obstacle")
                 free_path_detected_list.append(laser['number'])
@@ -289,8 +318,8 @@ class FlappyAutomationNode:
 
         else:
 
-            # bottom_section = sum([self.lidar_dict[f'laser_{i}']['dist_measured'] for i in [0, 1, 2, 3]])
-            # top_section = sum([self.lidar_dict[f'laser_{i}']['dist_measured'] for i in [5, 6, 7, 8]])
+            # bottom_section = sum([self.lidar_dict[f'laser_{i}']['distance'] for i in [0, 1, 2, 3]])
+            # top_section = sum([self.lidar_dict[f'laser_{i}']['distance'] for i in [5, 6, 7, 8]])
 
             # if bottom_section < top_section:
             #     self.move_flappy_up(LATERAL_TICK/2)
